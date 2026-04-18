@@ -24,8 +24,17 @@ class BackendClient:
     async def get_schedule(self, iso_week: str) -> dict[str, Any]:
         return await self._get("/api/schedule", params={"week": iso_week})
 
+    async def save_training_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self._post("/api/training-plans/generate", payload)
+
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             r = await client.get(f"{self.base_url}{path}", params=params)
+            r.raise_for_status()
+            return r.json()
+
+    async def _post(self, path: str, json: dict[str, Any] | None = None) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            r = await client.post(f"{self.base_url}{path}", json=json)
             r.raise_for_status()
             return r.json()

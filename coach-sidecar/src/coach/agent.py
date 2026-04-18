@@ -5,14 +5,15 @@ Principles:
     not acceptable; the system prompt enforces this and the tool list
     exposes `render` as the sole speaking surface.
   * Components published by `render` are validated against the registry
-    (see coach.components). Invalid components raise, which the agent
-    can observe and retry.
-  * Entrypoints: `generate_suggestions(context)` (one-shot, ephemeral)
-    and `chat(message, history)` (multi-turn; backend persists).
+    (see coach.components). Invalid components are reported back so the
+    agent can retry.
+  * Side-effect tools (e.g. `save_training_plan`) are callable alongside
+    `render`. The agent is expected to both persist the plan and render
+    TrainingSessionCards in the same turn.
 
-Skills live on the host under ~/.claude/skills and ~/.claude/plugins.
-The sidecar container mounts those to /root/.claude/... so the underlying
-`claude` CLI (used by the Agent SDK) finds them at its default locations.
+Skills live on the host under ~/.claude/skills and ~/.claude/plugins;
+the sidecar container mounts them to /root/.claude/... so the underlying
+`claude` CLI auto-discovers them.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from claude_agent_sdk import (
     tool,
 )
 
+from .backend_client import BackendClient
 from .components import (
     ComponentValidationError,
     REGISTRY_DESCRIPTION_FOR_PROMPT,
@@ -58,10 +60,25 @@ Rules:
     type.
   * Keep heading and tag text short. Keep body copy crisp and warm.
   * Respect the user's time: offer concrete options, not essays.
+
+Side-effect tools:
+  * `save_training_plan(isoWeek, rationale, sessions)` — persists a training
+    plan for the given ISO week. When composing a plan, call this first,
+    then include the same sessions as TrainingSessionCards in your `render`
+    output so the user sees them immediately. Each session must include
+    dayOfWeek (MONDAY..SUNDAY), durationMinutes (int), focus (string),
+    exercises (list of {{name, sets?, reps?, weight?, notes?}}), and
+    optionally plannedStart ("HH:MM").
 """
 
 MODEL = os.environ.get("COACH_MODEL", "claude-sonnet-4-6")
 
+# Module-level backend client so tools can reach persistence without
+# plumbing it through every call.
+_backend = BackendClient()
+
+
+# ----- Tools --------------------------------------------------------------
 
 def _make_render_tool(capture: dict[str, Any]):
     @tool(
@@ -97,17 +114,66 @@ def _make_render_tool(capture: dict[str, Any]):
     return render
 
 
+@tool(
+    "save_training_plan",
+    "Persist a composed training plan for a given ISO week. "
+    "Call this WITH the sessions, then also render TrainingSessionCards "
+    "for the same sessions in your `render` reply.",
+    {
+        "isoWeek": str,
+        "rationale": str,
+        "sessions": list,
+    },
+)
+async def save_training_plan_tool(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        result = await _backend.save_training_plan(
+            {
+                "isoWeek": args["isoWeek"],
+                "rationale": args.get("rationale", ""),
+                "sessions": args.get("sessions", []),
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.exception("save_training_plan failed")
+        return {
+            "content": [{"type": "text", "text": f"Failed to save plan: {exc}"}],
+            "is_error": True,
+        }
+    plan_id = result.get("id")
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": (
+                    f"Training plan saved (id={plan_id}, week={args['isoWeek']}). "
+                    "Now publish TrainingSessionCards via `render`."
+                ),
+            }
+        ]
+    }
+
+
+# ----- Runner -------------------------------------------------------------
+
 async def _run(prompt: str) -> list[dict[str, Any]]:
     """Run a single agent turn; return the components the agent published."""
     capture: dict[str, Any] = {"components": []}
     render_tool = _make_render_tool(capture)
-    server = create_sdk_mcp_server(name="coach-tools", version="0.1.0", tools=[render_tool])
+    server = create_sdk_mcp_server(
+        name="coach-tools",
+        version="0.1.0",
+        tools=[render_tool, save_training_plan_tool],
+    )
 
     options = ClaudeAgentOptions(
         system_prompt=SYSTEM_PROMPT,
         model=MODEL,
         mcp_servers={"coach": server},
-        allowed_tools=["mcp__coach__render"],
+        allowed_tools=[
+            "mcp__coach__render",
+            "mcp__coach__save_training_plan",
+        ],
     )
 
     async with ClaudeSDKClient(options=options) as client:
@@ -117,6 +183,8 @@ async def _run(prompt: str) -> list[dict[str, Any]]:
 
     return capture.get("components", [])
 
+
+# ----- Entry points -------------------------------------------------------
 
 async def generate_suggestions(
     context: str, snapshot: dict[str, Any]
@@ -142,7 +210,9 @@ outside `render`.
 
 
 async def chat(
-    message: str, history: list[dict[str, Any]], snapshot: dict[str, Any] | None = None
+    message: str,
+    history: list[dict[str, Any]],
+    snapshot: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Reply to a user message, aware of prior turns and current snapshot."""
     snapshot = snapshot or {}
