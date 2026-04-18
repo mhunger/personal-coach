@@ -69,6 +69,14 @@ Side-effect tools:
     dayOfWeek (MONDAY..SUNDAY), durationMinutes (int), focus (string),
     exercises (list of {{name, sets?, reps?, weight?, notes?}}), and
     optionally plannedStart ("HH:MM").
+
+  * `save_schedule_busy_blocks(isoWeek, busyBlocks, notes?)` — persists the
+    user's known commitments for a week. Each busy block is
+    {{day: MONDAY..SUNDAY, startTime: "HH:MM:SS", endTime: "HH:MM:SS",
+    label: string}}. When the user asks to "sync my calendar" or similar,
+    invoke the `gws calendar` CLI via Bash to list events for the relevant
+    window, convert them to busy blocks, and call this tool. After saving,
+    render a SuggestionCard or TextBlock summarising what was synced.
 """
 
 MODEL = os.environ.get("COACH_MODEL", "claude-sonnet-4-6")
@@ -154,6 +162,43 @@ async def save_training_plan_tool(args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+@tool(
+    "save_schedule_busy_blocks",
+    "Persist busy blocks for the given ISO week. Overwrites any prior "
+    "blocks for that week. Each block requires day, startTime, endTime, label.",
+    {
+        "isoWeek": str,
+        "busyBlocks": list,
+        "notes": str,
+    },
+)
+async def save_schedule_busy_blocks_tool(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        await _backend.save_schedule(
+            iso_week=args["isoWeek"],
+            payload={
+                "isoWeek": args["isoWeek"],
+                "notes": args.get("notes", ""),
+                "busyBlocks": args.get("busyBlocks", []),
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.exception("save_schedule_busy_blocks failed")
+        return {
+            "content": [{"type": "text", "text": f"Failed to save schedule: {exc}"}],
+            "is_error": True,
+        }
+    count = len(args.get("busyBlocks", []))
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": f"Saved {count} busy block(s) for {args['isoWeek']}.",
+            }
+        ]
+    }
+
+
 # ----- Runner -------------------------------------------------------------
 
 async def _run(prompt: str) -> list[dict[str, Any]]:
@@ -163,16 +208,25 @@ async def _run(prompt: str) -> list[dict[str, Any]]:
     server = create_sdk_mcp_server(
         name="coach-tools",
         version="0.1.0",
-        tools=[render_tool, save_training_plan_tool],
+        tools=[render_tool, save_training_plan_tool, save_schedule_busy_blocks_tool],
     )
 
     options = ClaudeAgentOptions(
         system_prompt=SYSTEM_PROMPT,
         model=MODEL,
+        # The claude_code preset gives the agent the standard toolset
+        # (Bash, Read, Glob, Grep, ...) so it can shell out to `gws` for
+        # calendar sync and use installed skills.
+        tools={"type": "preset", "preset": "claude_code"},
         mcp_servers={"coach": server},
         allowed_tools=[
             "mcp__coach__render",
             "mcp__coach__save_training_plan",
+            "mcp__coach__save_schedule_busy_blocks",
+            "Bash",
+            "Read",
+            "Glob",
+            "Grep",
         ],
     )
 
