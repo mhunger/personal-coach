@@ -7,8 +7,8 @@ Principles:
   * Components published by `render` are validated against the registry
     (see coach.components). Invalid components raise, which the agent
     can observe and retry.
-  * Two entrypoints today: `generate_suggestions(context)` (one-shot,
-    ephemeral) and `chat(message, history)` (multi-turn, caller persists).
+  * Entrypoints: `generate_suggestions(context)` (one-shot, ephemeral)
+    and `chat(message, history)` (multi-turn; backend persists).
 
 Skills live on the host under ~/.claude/skills and ~/.claude/plugins.
 The sidecar container mounts those to /root/.claude/... so the underlying
@@ -98,10 +98,7 @@ def _make_render_tool(capture: dict[str, Any]):
 
 
 async def _run(prompt: str) -> list[dict[str, Any]]:
-    """Run a single agent turn; return the components the agent published.
-
-    The agent is expected to call `render` exactly once.
-    """
+    """Run a single agent turn; return the components the agent published."""
     capture: dict[str, Any] = {"components": []}
     render_tool = _make_render_tool(capture)
     server = create_sdk_mcp_server(name="coach-tools", version="0.1.0", tools=[render_tool])
@@ -116,17 +113,14 @@ async def _run(prompt: str) -> list[dict[str, Any]]:
     async with ClaudeSDKClient(options=options) as client:
         await client.query(prompt)
         async for msg in client.receive_response():
-            # Drain until the agent finishes. Components are collected via the tool.
             log.debug("agent msg: %s", msg)
 
     return capture.get("components", [])
 
 
-async def generate_suggestions(context: str, snapshot: dict[str, Any]) -> list[dict[str, Any]]:
-    """Produce 2-3 SuggestionCards based on the current context snapshot.
-
-    `snapshot` is a dict with keys like 'profile', 'schedule', 'now'.
-    """
+async def generate_suggestions(
+    context: str, snapshot: dict[str, Any]
+) -> list[dict[str, Any]]:
     profile = snapshot.get("profile") or {}
     schedule = snapshot.get("schedule") or {}
     now = snapshot.get("now") or datetime.now().isoformat()
@@ -145,3 +139,59 @@ field for a short uppercase label like "FOR TODAY" or "THIS WEEK". No prose
 outside `render`.
 """
     return await _run(prompt)
+
+
+async def chat(
+    message: str, history: list[dict[str, Any]], snapshot: dict[str, Any] | None = None
+) -> list[dict[str, Any]]:
+    """Reply to a user message, aware of prior turns and current snapshot."""
+    snapshot = snapshot or {}
+    prompt = _build_chat_prompt(message, history, snapshot)
+    return await _run(prompt)
+
+
+def _build_chat_prompt(
+    message: str, history: list[dict[str, Any]], snapshot: dict[str, Any]
+) -> str:
+    lines: list[str] = []
+    profile = snapshot.get("profile") or {}
+    schedule = snapshot.get("schedule") or {}
+    if profile or schedule:
+        lines.append("Current user context:")
+        if profile:
+            lines.append(f"  profile: {profile}")
+        if schedule:
+            lines.append(f"  schedule: {schedule}")
+        lines.append("")
+
+    if history:
+        lines.append("Conversation so far (oldest → newest):")
+        for turn in history:
+            role = turn.get("role", "user")
+            summary = _summarize_components(turn.get("components") or [])
+            lines.append(f"  {role}: {summary}")
+        lines.append("")
+
+    lines.append(f"The user just said: {message!r}")
+    lines.append("")
+    lines.append("Reply via the `render` tool — components only, no prose.")
+    return "\n".join(lines)
+
+
+def _summarize_components(components: list[dict[str, Any]]) -> str:
+    parts: list[str] = []
+    for c in components:
+        kind = c.get("type")
+        if kind == "TextBlock":
+            parts.append(str(c.get("content", "")))
+        elif kind == "SuggestionCard":
+            parts.append(f"[Suggestion: {c.get('heading', '')}]")
+        elif kind == "TrainingSessionCard":
+            parts.append(
+                f"[Session {c.get('dayOfWeek', '')}: {c.get('focus', '')}]"
+            )
+        elif kind == "RecipeCard":
+            parts.append(f"[Recipe: {c.get('title', '')}]")
+        else:
+            parts.append(f"[{kind}]")
+    return " · ".join(parts) if parts else "(empty)"

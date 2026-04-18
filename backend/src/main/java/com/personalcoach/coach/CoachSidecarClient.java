@@ -5,6 +5,7 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -28,6 +29,17 @@ public class CoachSidecarClient {
         return http.post()
                 .uri("/coach/suggestions")
                 .body(Map.of("context", context))
+                .retrieve()
+                .body(ComponentStream.class);
+    }
+
+    public ComponentStream chat(String message, List<Map<String, Object>> history) {
+        return http.post()
+                .uri("/coach/chat")
+                .body(Map.of(
+                        "message", message,
+                        "history", history
+                ))
                 .retrieve()
                 .body(ComponentStream.class);
     }
