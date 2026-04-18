@@ -1,0 +1,53 @@
+services:
+  mysql:
+    image: mysql:8
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-personal_coach}
+      MYSQL_USER: ${MYSQL_USER:-coach}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-coach}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  coach-sidecar:
+    build:
+      context: ./coach-sidecar
+      dockerfile: Dockerfile
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      BACKEND_URL: http://backend:8080
+      COACH_MODEL: ${COACH_MODEL:-claude-sonnet-4-6}
+    volumes:
+      # Host skills and plugins mounted read-only so the claude CLI
+      # auto-discovers them at its default $HOME paths.
+      - ${HOME}/.claude/skills:/root/.claude/skills:ro
+      - ${HOME}/.claude/plugins:/root/.claude/plugins:ro
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-personal_coach}
+      MYSQL_USER: ${MYSQL_USER:-coach}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-coach}
+      COACH_SIDECAR_URL: http://coach-sidecar:8000
+      BACKEND_PORT: "8080"
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    restart: unless-stopped
+
+volumes:
+  mysql-data:

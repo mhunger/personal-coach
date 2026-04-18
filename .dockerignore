@@ -1,0 +1,25 @@
+# Keep build contexts tight.
+.git/
+.idea/
+.vscode/
+.env
+.env.*
+!.env.example
+
+# Node / Flutter / Maven / Python build output
+**/node_modules/
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.pub-cache/
+**/build/
+**/target/
+**/__pycache__/
+**/.venv/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+
+# OS
+.DS_Store
+Thumbs.db
