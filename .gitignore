@@ -1,0 +1,52 @@
+# --- secrets -------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# --- OS ------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+
+# --- editors / IDEs ------------------------------------------------------
+.idea/
+.vscode/
+*.iml
+*.swp
+
+# --- Java / Maven (backend) ---------------------------------------------
+backend/target/
+backend/.mvn/wrapper/maven-wrapper.jar
+backend/**/*.class
+backend/**/hs_err_pid*
+
+# --- Python (coach-sidecar) ---------------------------------------------
+coach-sidecar/__pycache__/
+coach-sidecar/**/__pycache__/
+coach-sidecar/.venv/
+coach-sidecar/venv/
+coach-sidecar/.pytest_cache/
+coach-sidecar/.mypy_cache/
+coach-sidecar/.ruff_cache/
+coach-sidecar/*.egg-info/
+coach-sidecar/dist/
+coach-sidecar/build/
+
+# --- Flutter (frontend) -------------------------------------------------
+frontend/.dart_tool/
+frontend/.flutter-plugins
+frontend/.flutter-plugins-dependencies
+frontend/.pub-cache/
+frontend/.pub/
+frontend/build/
+frontend/.packages
+frontend/.metadata
+frontend/pubspec.lock
+frontend/ios/
+frontend/android/
+frontend/macos/
+frontend/linux/
+frontend/windows/
+
+# --- Docker / runtime ---------------------------------------------------
+*.log
+mysql-data/
