@@ -1,0 +1,39 @@
+spring:
+  application:
+    name: personal-coach-backend
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:mysql}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:personal_coach}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: ${MYSQL_USER:coach}
+    password: ${MYSQL_PASSWORD:coach}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate.dialect: org.hibernate.dialect.MySQL8Dialect
+      hibernate.jdbc.time_zone: UTC
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+  mvc:
+    static-path-pattern: /**
+  web:
+    resources:
+      static-locations: classpath:/static/
+  jackson:
+    default-property-inclusion: non_null
+
+server:
+  port: ${BACKEND_PORT:8080}
+  error:
+    include-message: always
+
+coach:
+  sidecar:
+    base-url: ${COACH_SIDECAR_URL:http://coach-sidecar:8000}
+
+logging:
+  level:
+    com.personalcoach: INFO
+    org.hibernate.SQL: INFO
